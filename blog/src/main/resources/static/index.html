@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blog Platform</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Personal Blog</h1>
+      <button class="btn-primary" id="toggle-form-btn" onclick="toggleForm()">+ New Post</button>
+    </header>
+
+    <section class="card" id="form-card" style="display: none;">
+      <h2 id="form-title" style="margin-bottom: 1rem; font-size: 1.1rem; color: var(--pink-light);">Write a New Post</h2>
+      <form id="post-form" onsubmit="handleFormSubmit(event)">
+        <input type="hidden" id="post-id">
+
+        <div class="form-group">
+          <label for="title">Title</label>
+          <input type="text" id="title" required placeholder="Enter post title...">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="category">Category</label>
+            <input type="text" id="category" required placeholder="e.g. Technology, Travel">
+          </div>
+          <div class="form-group">
+            <label for="tags">Tags (comma-separated)</label>
+            <input type="text" id="tags" required placeholder="Tech, Coding, Java">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="content">Content</label>
+          <textarea id="content" required placeholder="Write your post content here..."></textarea>
+        </div>
+
+        <div class="btn-group">
+          <button type="submit" class="btn-primary" id="submit-btn">Publish</button>
+          <button type="button" class="btn-secondary" onclick="resetAndCloseForm()">Cancel</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="search-bar">
+      <input type="text" id="search-input" placeholder="Search by title, content, or category..." onkeydown="if(event.key === 'Enter') searchPosts()">
+      <button class="btn-secondary" onclick="searchPosts()">Search</button>
+      <button class="btn-secondary" onclick="resetFilters()">Reset All</button>
+    </section>
+
+    <div class="tag-cloud" id="tag-cloud"></div>
+
+    <div class="active-filter-bar" id="active-filter-bar" style="display: none;">
+      <span>Filtering by tag: <strong id="active-tag-name" style="color: var(--pink-light);"></strong></span>
+      <button class="btn-secondary" style="padding: 0.25rem 0.75rem; font-size: 0.75rem;" onclick="resetFilters()">Clear Filter</button>
+    </div>
+
+    <main id="posts-container"></main>
+  </div>
+
+  <script>
+    const API_BASE = '/posts';
+    let currentTag = '';
+    let isStaticMode = false;
+
+    const INITIAL_DEMO_POSTS = [
+      {
+        id: 1,
+        title: "Building a Modern REST API with Spring Boot",
+        category: "Engineering",
+        content: "Designing clean RESTful architecture with proper HTTP status codes, validation, and relational persistence in MySQL.",
+        tags: ["Java", "SpringBoot", "Backend"],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      {
+        id: 2,
+        title: "Crafting Dark Neon Interfaces",
+        category: "Design",
+        content: "Combining glowing borders, deep purple gradients, and soft blue accents to build modern cyberpunk-inspired web interfaces.",
+        tags: ["CSS", "Frontend", "UI"],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    ];
+
+    document.addEventListener('DOMContentLoaded', () => {
+      if (window.location.protocol === 'file:' || window.location.hostname.includes('github.io')) {
+        isStaticMode = true;
+        if (!localStorage.getItem('blog_posts')) {
+          localStorage.setItem('blog_posts', JSON.stringify(INITIAL_DEMO_POSTS));
+        }
+      }
+      fetchPosts();
+    });
+
+    async function fetchPosts(term = '', tag = '') {
+      if (isStaticMode) {
+        let posts = JSON.parse(localStorage.getItem('blog_posts') || '[]');
+        if (tag) {
+          posts = posts.filter(p => p.tags.some(t => t.toLowerCase() === tag.toLowerCase()));
+        } else if (term) {
+          const lower = term.toLowerCase();
+          posts = posts.filter(p =>
+            p.title.toLowerCase().includes(lower) ||
+            p.content.toLowerCase().includes(lower) ||
+            p.category.toLowerCase().includes(lower)
+          );
+        }
+        renderPosts(posts);
+        if (!tag && !term) updateTagCloud(posts);
+        return;
+      }
+
+      let url = API_BASE;
+      const params = new URLSearchParams();
+      if (tag) params.append('tag', tag);
+      else if (term) params.append('term', term);
+      if (params.toString()) url += `?${params.toString()}`;
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('API offline');
+        const posts = await response.json();
+        renderPosts(posts);
+        if (!tag && !term) updateTagCloud(posts);
+      } catch (err) {
+        isStaticMode = true;
+        if (!localStorage.getItem('blog_posts')) {
+          localStorage.setItem('blog_posts', JSON.stringify(INITIAL_DEMO_POSTS));
+        }
+        fetchPosts(term, tag);
+      }
+    }
+
+    function filterByTag(tag) {
+      currentTag = tag;
+      document.getElementById('search-input').value = '';
+      document.getElementById('active-tag-name').innerText = `#${tag}`;
+      document.getElementById('active-filter-bar').style.display = 'flex';
+      fetchPosts('', tag);
+    }
+
+    function resetFilters() {
+      currentTag = '';
+      document.getElementById('search-input').value = '';
+      document.getElementById('active-filter-bar').style.display = 'none';
+      fetchPosts();
+    }
+
+    function updateTagCloud(posts) {
+      const tagSet = new Set();
+      posts.forEach(p => p.tags.forEach(t => tagSet.add(t)));
+      const cloud = document.getElementById('tag-cloud');
+      if (!tagSet.size) { cloud.innerHTML = ''; return; }
+
+      cloud.innerHTML = `<span class="tag-cloud-label">Popular tags:</span>` +
+        Array.from(tagSet).map(tag => `
+          <span class="tag" onclick="filterByTag('${escapeJs(tag)}')">#${escapeHtml(tag)}</span>
+        `).join('');
+    }
+
+    function renderPosts(posts) {
+      const container = document.getElementById('posts-container');
+      if (!posts.length) {
+        container.innerHTML = `<p style="color: var(--text-muted); text-align: center; margin-top: 2rem;">No posts found.</p>`;
+        return;
+      }
+
+      container.innerHTML = posts.map(post => `
+        <article class="card post-item">
+          <div class="post-header">
+            <h3 class="post-title">${escapeHtml(post.title)}</h3>
+            <span class="post-category">${escapeHtml(post.category)}</span>
+          </div>
+          <p class="post-content">${escapeHtml(post.content)}</p>
+          <div class="post-tags">
+            ${post.tags.map(tag => `
+              <span class="tag" title="Filter by #${escapeHtml(tag)}" onclick="filterByTag('${escapeJs(tag)}')">#${escapeHtml(tag)}</span>
+            `).join('')}
+          </div>
+          <div class="post-footer">
+            <span>Posted: ${new Date(post.createdAt).toLocaleDateString()}</span>
+            <div class="btn-group">
+              <button class="btn-secondary" onclick="editPost(${post.id})">Edit</button>
+              <button class="btn-danger" onclick="deletePost(${post.id})">Delete</button>
+            </div>
+          </div>
+        </article>
+      `).join('');
+    }
+
+    async function handleFormSubmit(e) {
+      e.preventDefault();
+      const id = document.getElementById('post-id').value;
+      const title = document.getElementById('title').value.trim();
+      const category = document.getElementById('category').value.trim();
+      const content = document.getElementById('content').value.trim();
+      const tags = document.getElementById('tags').value.split(',').map(t => t.trim()).filter(t => t.length > 0);
+
+      const payload = { title, category, content, tags };
+
+      if (isStaticMode) {
+        let posts = JSON.parse(localStorage.getItem('blog_posts') || '[]');
+        if (id) {
+          posts = posts.map(p => p.id === parseInt(id) ? { ...p, ...payload, updatedAt: new Date().toISOString() } : p);
+        } else {
+          const newPost = { ...payload, id: Date.now(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+          posts.unshift(newPost);
+        }
+        localStorage.setItem('blog_posts', JSON.stringify(posts));
+        resetAndCloseForm();
+        resetFilters();
+        return;
+      }
+
+      try {
+        const url = id ? `${API_BASE}/${id}` : API_BASE;
+        const method = id ? 'PUT' : 'POST';
+        const response = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          alert('Error: ' + JSON.stringify(err));
+          return;
+        }
+
+        resetAndCloseForm();
+        resetFilters();
+      } catch (err) {
+        console.error('Request failed:', err);
+      }
+    }
+
+    function editPost(id) {
+      let post;
+      if (isStaticMode) {
+        const posts = JSON.parse(localStorage.getItem('blog_posts') || '[]');
+        post = posts.find(p => p.id === id);
+      }
+
+      if (!post) {
+        fetch(`${API_BASE}/${id}`)
+          .then(r => r.json())
+          .then(p => populateEditForm(p))
+          .catch(console.error);
+        return;
+      }
+      populateEditForm(post);
+    }
+
+    function populateEditForm(post) {
+      document.getElementById('post-id').value = post.id;
+      document.getElementById('title').value = post.title;
+      document.getElementById('category').value = post.category;
+      document.getElementById('content').value = post.content;
+      document.getElementById('tags').value = post.tags.join(', ');
+
+      document.getElementById('form-title').innerText = 'Edit Blog Post';
+      document.getElementById('submit-btn').innerText = 'Save Changes';
+      document.getElementById('form-card').style.display = 'block';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function deletePost(id) {
+      if (!confirm('Are you sure you want to delete this post?')) return;
+
+      if (isStaticMode) {
+        let posts = JSON.parse(localStorage.getItem('blog_posts') || '[]');
+        posts = posts.filter(p => p.id !== id);
+        localStorage.setItem('blog_posts', JSON.stringify(posts));
+        resetFilters();
+        return;
+      }
+
+      fetch(`${API_BASE}/${id}`, { method: 'DELETE' }).then(() => resetFilters());
+    }
+
+    function searchPosts() {
+      currentTag = '';
+      document.getElementById('active-filter-bar').style.display = 'none';
+      const term = document.getElementById('search-input').value.trim();
+      fetchPosts(term);
+    }
+
+    function toggleForm() {
+      const card = document.getElementById('form-card');
+      card.style.display = card.style.display === 'none' ? 'block' : 'none';
+      if (card.style.display === 'none') resetAndCloseForm();
+    }
+
+    function resetAndCloseForm() {
+      document.getElementById('post-form').reset();
+      document.getElementById('post-id').value = '';
+      document.getElementById('form-title').innerText = 'Write a New Post';
+      document.getElementById('submit-btn').innerText = 'Publish';
+      document.getElementById('form-card').style.display = 'none';
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    function escapeJs(str) {
+      return str.replace(/'/g, "\\'");
+    }
+  </script>
+</body>
+</html>
